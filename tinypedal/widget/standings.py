@@ -20,6 +20,9 @@
 Standings Widget
 """
 
+from PySide2.QtCore import QRectF
+from PySide2.QtGui import QColor, QPainter, QPainterPath, QPen
+
 from .. import calculation as calc
 from .. import units
 from ..api_control import api
@@ -38,8 +41,11 @@ class Realtime(Overlay):
     def __init__(self, config, widget_name):
         # Assign base setting
         super().__init__(config, widget_name)
-        layout = self.set_grid_layout(gap_vert=self.wcfg["bar_gap"])
-        self.set_primary_layout(layout=layout)
+        layout = self.set_grid_layout(
+            gap_hori=3,
+            gap_vert=max(int(self.wcfg["bar_gap"]), 3),
+        )
+        self.set_primary_layout(layout=layout, margin=8)
 
         # Config font
         font = self.config_font(
@@ -375,6 +381,8 @@ class Realtime(Overlay):
                 )
                 for _ in range(self.veh_range)
             )
+            for target in self.bars_dlt:
+                target.standings_style = True
             self.set_grid_layout_table_column(
                 layout=layout,
                 targets=self.bars_dlt,
@@ -492,6 +500,8 @@ class Realtime(Overlay):
                 )
                 for _ in range(self.veh_range)
             )
+            for target in self.bars_tcp:
+                target.standings_style = True
             self.set_grid_layout_table_column(
                 layout=layout,
                 targets=self.bars_tcp,
@@ -721,6 +731,34 @@ class Realtime(Overlay):
                 column=self.wcfg["display_order_lift_and_coast_time"],
                 hide_start=1,
             )
+
+    def set_rawtext(self, *args, **kwargs):
+        """Create standings cells with the standings visual treatment."""
+        targets = super().set_rawtext(*args, **kwargs)
+        target_list = targets if isinstance(targets, tuple) else (targets,)
+        for target in target_list:
+            target.standings_style = True
+        return targets
+
+    def set_rawimage(self, *args, **kwargs):
+        """Apply standings styling to brand image cells."""
+        targets = super().set_rawimage(*args, **kwargs)
+        target_list = targets if isinstance(targets, tuple) else (targets,)
+        for target in target_list:
+            target.standings_style = True
+        return targets
+
+    def paintEvent(self, event):
+        """Paint the opaque rounded table surface behind the cells."""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        panel = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        path = QPainterPath()
+        path.addRoundedRect(panel, max(self.wcfg["font_size"] * 0.42, 8),
+                            max(self.wcfg["font_size"] * 0.42, 8))
+        painter.fillPath(path, QColor("#F7121B26"))
+        painter.setPen(QPen(QColor("#557F9BAA"), 1))
+        painter.drawPath(path)
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
@@ -1008,6 +1046,7 @@ class Realtime(Overlay):
 
     def update_pit(self, target, *data):
         """Vehicle in pit"""
+        target.standings_preserve_color = True
         if target.last != data:
             target.last = data
             if data[2]:  # finish flag

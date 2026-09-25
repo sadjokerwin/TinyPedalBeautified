@@ -21,7 +21,7 @@ Deltabest Widget
 """
 
 from PySide2.QtCore import QRectF, Qt
-from PySide2.QtGui import QPainter, QPen
+from PySide2.QtGui import QColor, QLinearGradient, QPainter, QPainterPath, QPen
 
 from .. import calculation as calc
 from ..module_info import minfo
@@ -51,42 +51,28 @@ class Realtime(Overlay):
         padx = round(font_m.width * self.wcfg["bar_padding_horizontal"])
         pady = round(font_m.capital * self.wcfg["bar_padding_vertical"])
         self.dbar_length = int(self.wcfg["delta_bar_length"] * 0.5)
-        dbar_height = int(self.wcfg["delta_bar_height"])
+        self.dbar_height = max(int(self.wcfg["delta_bar_height"]), 6)
 
         self.decimals = max(self.wcfg["decimal_places"], 1)
         self.delta_display_range = calc.decimal_strip(self.wcfg["delta_display_range"], self.decimals)
         self.max_padding = 4 + self.decimals
         self.delta_width = font_m.width * self.max_padding + padx * 2
-        delta_height = font_m.capital + pady * 2
-
-        if self.wcfg["layout"] == 0:
-            pos_y1 = 0
-        else:
-            pos_y1 = delta_height + bar_gap
-
-        if self.wcfg["show_delta_bar"]:
-            pos_x2 = self.dbar_length - self.delta_width * 0.5
-        else:
-            pos_x2 = 0
-
-        if self.wcfg["layout"] == 0 and self.wcfg["show_delta_bar"]:
-            pos_y2 = dbar_height + bar_gap
-        else:
-            pos_y2 = 0
-
-        self.rect_deltabar = QRectF(0, pos_y1, self.dbar_length * 2, dbar_height)
-        self.rect_deltapos = QRectF(0, pos_y1, self.dbar_length, dbar_height)
-        self.rect_delta = QRectF(pos_x2, pos_y2, self.delta_width, delta_height)
-        self.rect_text_delta = self.rect_delta.adjusted(0, font_m.voffset, 0, 0)
+        self.delta_height = font_m.capital + pady * 2
+        self.bar_gap = max(int(bar_gap), 3)
+        self.card_padding = max(round(self.wcfg["font_size"] * 0.38), 6)
 
         self.freeze_duration = min(max(self.wcfg["freeze_duration"], 0), 30)
-        self.delta_color = self.wcfg["background_color_time_gain"], self.wcfg["background_color_time_loss"]
+        self.delta_color = (
+            QColor(self.wcfg["background_color_time_gain"]),
+            QColor(self.wcfg["background_color_time_loss"]),
+        )
 
-        # Config canvas
+        content_width = max(self.dbar_length * 2, self.delta_width)
+        content_height = self.delta_height
         if self.wcfg["show_delta_bar"]:
-            self.resize(self.dbar_length * 2, dbar_height + bar_gap + delta_height)
-        else:
-            self.resize(self.delta_width, delta_height)
+            content_height += self.bar_gap + self.dbar_height
+        self.resize(content_width + self.card_padding * 2,
+                     content_height + self.card_padding * 2)
 
         self.pen_text = QPen()
 
@@ -115,43 +101,78 @@ class Realtime(Overlay):
     def paintEvent(self, event):
         """Draw"""
         painter = QPainter(self)
-        delta_pos = self.delta_position(
-            self.wcfg["delta_bar_display_range"],
-            self.delta_best,
-            self.dbar_length)
-        highlight_color = self.delta_color[self.delta_best > 0]
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setRenderHint(QPainter.TextAntialiasing, True)
+        panel = QRectF(0.5, 0.5, self.width() - 1, self.height() - 1)
+        panel_path = QPainterPath()
+        radius = max(self.wcfg["font_size"] * 0.34, 8)
+        panel_path.addRoundedRect(panel, radius, radius)
+        painter.fillPath(panel_path, QColor("#FF121B26"))
+        painter.setPen(QPen(QColor("#557F9BAA"), 1))
+        painter.drawPath(panel_path)
 
-        # Draw deltabar
-        if self.wcfg["show_delta_bar"]:
-            self.rect_deltapos.setLeft(delta_pos)
-            painter.fillRect(self.rect_deltabar, self.wcfg["background_color_delta_bar"])
-            painter.fillRect(self.rect_deltapos, highlight_color)
+        highlight_color = QColor(self.delta_color[self.delta_best > 0])
+        pad = self.card_padding
+        bar_width = self.width() - pad * 2
+        value_text = f"{calc.sym_max(self.delta_best, self.delta_display_range):+.{self.decimals}f}"[:self.max_padding]
+        if self.wcfg["layout"] == 0 and self.wcfg["show_delta_bar"]:
+            bar_y = pad
+            value_y = bar_y + self.dbar_height + self.bar_gap
+        elif self.wcfg["show_delta_bar"]:
+            value_y = pad
+            bar_y = value_y + self.delta_height + self.bar_gap
+        else:
+            value_y = pad
 
-            if self.wcfg["enable_animated_deltabest"]:
-                pos_x = calc.zero_max(
-                    delta_pos - self.delta_width * 0.5,
-                    self.dbar_length * 2 - self.delta_width,
-                )
-                self.rect_delta.moveLeft(pos_x)
-                self.rect_text_delta.moveLeft(pos_x)
-
-        # Draw delta readings
+        value_width = min(self.delta_width, bar_width)
+        value_rect = QRectF(pad + (bar_width - value_width) / 2,
+                            value_y, value_width, self.delta_height)
         if self.wcfg["swap_style"]:
-            self.pen_text.setColor(self.wcfg["background_color_deltabest"])
-            bg_color = highlight_color
+            chip_path = QPainterPath()
+            chip_path.addRoundedRect(value_rect, radius * 0.45, radius * 0.45)
+            painter.fillPath(chip_path, highlight_color)
+            self.pen_text.setColor(self.wcfg["font_color_deltabest"])
         else:
             self.pen_text.setColor(highlight_color)
-            bg_color =  self.wcfg["background_color_deltabest"]
-
-        painter.fillRect(self.rect_delta, bg_color)
         painter.setPen(self.pen_text)
-        painter.drawText(
-            self.rect_text_delta,
-            Qt.AlignCenter,
-            f"{calc.sym_max(self.delta_best, self.delta_display_range):+.{self.decimals}f}"[:self.max_padding]
-        )
+        painter.drawText(value_rect, Qt.AlignCenter, value_text)
 
-    # Additional methods
-    def delta_position(self, rng, delta, length):
-        """Delta position"""
-        return (1 - calc.sym_max(delta, rng) / rng) * length
+        # Fixed zero point: gains extend left in green and losses extend right in red.
+        if self.wcfg["show_delta_bar"]:
+            track = QRectF(pad, bar_y, bar_width, self.dbar_height)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor("#2736404B"))
+            painter.drawRoundedRect(track, self.dbar_height / 2, self.dbar_height / 2)
+            display_range = max(abs(self.wcfg["delta_bar_display_range"]), 0.001)
+            fill_width = min(abs(self.delta_best) / display_range, 1.0) * track.width() / 2
+            if fill_width > 0:
+                fill_x = track.center().x() if self.delta_best > 0 else track.center().x() - fill_width
+                fill = QRectF(fill_x, track.top(), fill_width, track.height())
+                gradient = QLinearGradient(fill.topLeft(), fill.topRight())
+                gradient.setColorAt(0, highlight_color.darker(112))
+                gradient.setColorAt(1, highlight_color.lighter(118))
+                painter.setBrush(gradient)
+                radius = min(self.dbar_height / 2, fill_width / 2)
+                fill_path = QPainterPath()
+                if self.delta_best > 0:
+                    fill_path.moveTo(fill.left(), fill.top())
+                    fill_path.lineTo(fill.right() - radius, fill.top())
+                    fill_path.quadTo(fill.right(), fill.top(), fill.right(), fill.top() + radius)
+                    fill_path.lineTo(fill.right(), fill.bottom() - radius)
+                    fill_path.quadTo(fill.right(), fill.bottom(), fill.right() - radius, fill.bottom())
+                    fill_path.lineTo(fill.left(), fill.bottom())
+                else:
+                    fill_path.moveTo(fill.left() + radius, fill.top())
+                    fill_path.lineTo(fill.right(), fill.top())
+                    fill_path.lineTo(fill.right(), fill.bottom())
+                    fill_path.lineTo(fill.left() + radius, fill.bottom())
+                    fill_path.quadTo(fill.left(), fill.bottom(), fill.left(), fill.bottom() - radius)
+                    fill_path.lineTo(fill.left(), fill.top() + radius)
+                    fill_path.quadTo(fill.left(), fill.top(), fill.left() + radius, fill.top())
+                fill_path.closeSubpath()
+                painter.drawPath(fill_path)
+            painter.setPen(QPen(QColor("#99DCE5EC"), 1))
+            center_x = track.center().x()
+            painter.drawLine(int(center_x), int(track.top() - 2),
+                             int(center_x), int(track.bottom() + 2))
+

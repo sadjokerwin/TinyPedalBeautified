@@ -585,6 +585,10 @@ class Switch(_reader.Switch, DataAdapter):
         """Motor or engine map level"""
         return -1
 
+    def motor_map_max(self, index: int | None = None) -> int:
+        """Maximum motor or engine map level, unavailable in rFactor 2 telemetry"""
+        return -1
+
     def brake_migration_level(self, index: int | None = None) -> int:
         """Brake migration level"""
         return -1

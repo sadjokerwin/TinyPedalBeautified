@@ -627,6 +627,10 @@ class Switch(_reader.Switch, DataAdapter):
             return tele_veh.mMotorMap
         return -1
 
+    def motor_map_max(self, index: int | None = None) -> int:
+        """Maximum motor or engine map level"""
+        return self.shmm.lmuTeleVeh(index).mMotorMapMax
+
     def brake_migration_level(self, index: int | None = None) -> int:
         """Brake migration level"""
         tele_veh = self.shmm.lmuTeleVeh(index)

@@ -449,6 +449,10 @@ class Switch(ABC):
         """Motor or engine map level"""
 
     @abstractmethod
+    def motor_map_max(self, index: int | None = None) -> int:
+        """Maximum motor or engine map level, -1 when unavailable"""
+
+    @abstractmethod
     def brake_migration_level(self, index: int | None = None) -> int:
         """Brake migration level"""
 

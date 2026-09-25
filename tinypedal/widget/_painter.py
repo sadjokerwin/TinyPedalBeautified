@@ -25,8 +25,47 @@ from __future__ import annotations
 from typing import Any
 
 from PySide2.QtCore import QRectF, Qt
-from PySide2.QtGui import QFont, QPainter, QPen, QPixmap
+from PySide2.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QPixmap
 from PySide2.QtWidgets import QWidget
+
+
+def paint_standings_cell(painter: QPainter, widget: QWidget, rect: QRectF, bg_color):
+    """Draw a standings cell with the shared dark-card treatment."""
+    if not getattr(widget, "standings_style", False):
+        painter.fillRect(rect, bg_color)
+        return False
+
+    widget._standings_text_color = None
+    background = QColor(bg_color)
+    if background.alpha() == 0 or rect.width() <= 1 or rect.height() <= 1:
+        return False
+
+    if getattr(widget, "standings_preserve_color", False):
+        border = background.lighter(135)
+        border.setAlpha(min(background.alpha(), 110))
+    elif background.saturation() < 55:
+        if 155 <= background.lightness() < 250:
+            background = QColor("#294A43")
+            border = QColor("#586B9A8B")
+            widget._standings_text_color = QColor("#D9FFF5")
+        elif background.lightness() < 155:
+            background = QColor("#E51A2631")
+            border = QColor("#41596A78")
+        else:
+            border = background.lighter(135)
+            border.setAlpha(min(background.alpha(), 110))
+    else:
+        border = background.lighter(135)
+        border.setAlpha(min(background.alpha(), 110))
+        widget._standings_text_color = None
+
+    path = QPainterPath()
+    radius = min(rect.height() * 0.26, 5)
+    path.addRoundedRect(rect.adjusted(0.5, 0.5, -0.5, -0.5), radius, radius)
+    painter.fillPath(path, background)
+    painter.setPen(QPen(border, 0.7))
+    painter.drawPath(path)
+    return True
 
 
 class WheelGaugeBar(QWidget):
@@ -145,6 +184,7 @@ class PedalInputBar(QWidget):
         ffb_color: str = "",
         show_reading: bool = False,
         horizontal_style: bool = False,
+        modern_style: bool = False,
     ):
         super().__init__(parent)
         self.last = None
@@ -160,6 +200,7 @@ class PedalInputBar(QWidget):
         self.rect_filtered = QRectF(*filtered_size)
         self.rect_text = QRectF(*reading_size)
         self.horizontal_style = horizontal_style
+        self.modern_style = modern_style
 
         if ffb_color:
             self.rect_max = self.rect_pedal
@@ -200,11 +241,26 @@ class PedalInputBar(QWidget):
     def paintEvent(self, event):
         """Draw"""
         painter = QPainter(self)
-        painter.fillRect(self.rect_pedal, self.bg_color)
-        painter.fillRect(self.rect_raw, self.input_color)
-        painter.fillRect(self.rect_filtered, self.input_color)
+        if self.modern_style:
+            painter.setRenderHint(QPainter.Antialiasing, True)
+            radius = max(min(self.rect_pedal.width(), self.rect_pedal.height()) * 0.28, 2)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(self.bg_color))
+            painter.drawRoundedRect(self.rect_pedal, radius, radius)
+            for rect in (self.rect_raw, self.rect_filtered):
+                painter.setBrush(QColor(self.input_color))
+                painter.drawRoundedRect(rect, radius * 0.72, radius * 0.72)
+        else:
+            painter.fillRect(self.rect_pedal, self.bg_color)
+            painter.fillRect(self.rect_raw, self.input_color)
+            painter.fillRect(self.rect_filtered, self.input_color)
         if self.is_maxed:
-            painter.fillRect(self.rect_max, self.max_color)
+            if self.modern_style:
+                painter.setBrush(QColor(self.max_color))
+                radius = max(min(self.rect_max.width(), self.rect_max.height()) * 0.28, 2)
+                painter.drawRoundedRect(self.rect_max, radius, radius)
+            else:
+                painter.fillRect(self.rect_max, self.max_color)
         if self.show_reading:
             painter.setPen(self.pen)
             painter.drawText(self.rect_text, Qt.AlignCenter, f"{self.input_reading:.0f}")
@@ -358,9 +414,38 @@ class GearGaugeBar(QWidget):
     def paintEvent(self, event):
         """Draw"""
         painter = QPainter(self)
-        painter.fillRect(self.rect_bar, self.bg_color)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        panel = self.rect_bar.adjusted(0.5, 0.5, -0.5, -0.5)
+        panel_path = QPainterPath()
+        panel_path.addRoundedRect(panel, min(panel.height() * 0.22, 8), min(panel.height() * 0.22, 8))
+        panel_color = QColor(self.bg_color)
+        painter.fillPath(panel_path, panel_color)
+        edge = panel_color.lighter(145)
+        edge.setAlpha(min(panel_color.alpha(), 100))
+        painter.setPen(QPen(edge, 0.8))
+        painter.drawPath(panel_path)
         if self.color_index == -4:  # flicker trigger
             return
+
+        # Give the gear its own subtle accent block, separated from the speed
+        # reading so the two values scan as distinct parts of one instrument.
+        gear_color = QColor(self.bg_color).lighter(155)
+        gear_color.setAlpha(70)
+        gear_path = QPainterPath()
+        gear_path.addRoundedRect(self.rect_gear.adjusted(3, 3, -2, -3), 5, 5)
+        painter.setPen(Qt.NoPen)
+        painter.fillPath(gear_path, gear_color)
+
+        if self.show_speed:
+            painter.setPen(QPen(edge, 0.8))
+            if self.rect_speed.top() >= self.rect_gear.bottom():
+                divider_y = self.rect_gear.bottom() + max((self.rect_speed.top() - self.rect_gear.bottom()) / 2, 1)
+                painter.drawLine(int(panel.left() + panel.width() * 0.12), int(divider_y),
+                                 int(panel.right() - panel.width() * 0.12), int(divider_y))
+            else:
+                divider_x = self.rect_gear.right() + max((self.rect_speed.left() - self.rect_gear.right()) / 2, 1)
+                painter.drawLine(int(divider_x), int(panel.top() + panel.height() * 0.22),
+                                 int(divider_x), int(panel.bottom() - panel.height() * 0.22))
         painter.setPen(self.pen)
         painter.drawText(self.rect_gear, Qt.AlignCenter, self.gear)
         if self.show_speed:
@@ -425,9 +510,25 @@ class RawText(QWidget):
     def paintEvent(self, event):
         """Draw"""
         painter = QPainter(self)
-        self._pen_text.setColor(self.fg)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        background = QColor(self.bg)
+        if getattr(self, "standings_style", False):
+            if background.alpha() > 0 and self._width > 2 and self._height > 2:
+                paint_standings_cell(
+                    painter, self, QRectF(0.5, 0.5, self._width - 1, self._height - 1), background
+                )
+        elif background.alpha() > 0 and self._width > 2 and self._height > 2:
+            rect = QRectF(0.5, 0.5, self._width - 1, self._height - 1)
+            radius = min(5.0, self._height * 0.28)
+            path = QPainterPath()
+            path.addRoundedRect(rect, radius, radius)
+            painter.fillPath(path, background)
+            border = background.lighter(135)
+            border.setAlpha(min(background.alpha(), 90))
+            painter.setPen(QPen(border, 0.7))
+            painter.drawPath(path)
+        self._pen_text.setColor(getattr(self, "_standings_text_color", None) or self.fg)
         painter.setPen(self._pen_text)
-        painter.fillRect(0, 0, self._width, self._height, self.bg)
         painter.drawText(0, self._offset_y, self._width, self._height, self._alignment, self.text)
 
 
@@ -476,7 +577,7 @@ class RawImage(QWidget):
     def paintEvent(self, event):
         """Draw"""
         painter = QPainter(self)
-        painter.fillRect(0, 0, self._width, self._height, self.bg)
+        paint_standings_cell(painter, self, QRectF(0, 0, self._width, self._height), self.bg)
         if isinstance(self.image, QPixmap):
             painter.drawPixmap(
                 (self._width - self.image.width()) // 2,  # align center
@@ -584,7 +685,7 @@ class MultiCompounds(QWidget):
     def paintEvent(self, event):
         """Draw"""
         painter = QPainter(self)
-        painter.fillRect(0, 0, self._width, self._height, self.bg)
+        paint_standings_cell(painter, self, QRectF(0, 0, self._width, self._height), self.bg)
         for index, compound in enumerate(self.compounds):
             if compound == "":
                 continue
@@ -662,7 +763,7 @@ class DeltaLapTime(QWidget):
     def paintEvent(self, event):
         """Draw"""
         painter = QPainter(self)
-        painter.fillRect(0, 0, self._width, self._height, self.bg)
+        paint_standings_cell(painter, self, QRectF(0, 0, self._width, self._height), self.bg)
         for index, delta in enumerate(
             reversed(self.delta) if self._inverted else self.delta
         ):
@@ -690,6 +791,8 @@ class DeltaLapTime(QWidget):
 
             if self.is_player:
                 fg_color = self.fg_player
+                if getattr(self, "standings_style", False):
+                    fg_color = QColor("#D9FFF5")
 
             self._pen_text.setColor(fg_color)
             painter.setPen(self._pen_text)
