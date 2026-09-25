@@ -30,40 +30,32 @@ from PySide2.QtWidgets import QWidget
 
 
 def paint_standings_cell(painter: QPainter, widget: QWidget, rect: QRectF, bg_color):
-    """Draw a standings cell with the shared dark-card treatment."""
+    """Draw a standings cell.
+
+    Deliberately simple: the caller (standings.py) decides per-field whether
+    a cell should look like a solid colored chip (pass an opaque, already
+    saturated color) or float as plain text on the row card (pass a fully
+    transparent color, e.g. "#00000000"). This function no longer tries to
+    infer intent from the color's saturation/lightness -- that heuristic
+    made cell appearance depend on incidental config values instead of an
+    explicit design choice.
+    """
     if not getattr(widget, "standings_style", False):
         painter.fillRect(rect, bg_color)
         return False
 
-    widget._standings_text_color = None
     background = QColor(bg_color)
     if background.alpha() == 0 or rect.width() <= 1 or rect.height() <= 1:
         return False
 
-    if getattr(widget, "standings_preserve_color", False):
-        border = background.lighter(135)
-        border.setAlpha(min(background.alpha(), 110))
-    elif background.saturation() < 55:
-        if 155 <= background.lightness() < 250:
-            background = QColor("#294A43")
-            border = QColor("#586B9A8B")
-            widget._standings_text_color = QColor("#D9FFF5")
-        elif background.lightness() < 155:
-            background = QColor("#E51A2631")
-            border = QColor("#41596A78")
-        else:
-            border = background.lighter(135)
-            border.setAlpha(min(background.alpha(), 110))
-    else:
-        border = background.lighter(135)
-        border.setAlpha(min(background.alpha(), 110))
-        widget._standings_text_color = None
+    border = background.lighter(140)
+    border.setAlpha(min(background.alpha(), 130))
 
     path = QPainterPath()
-    radius = min(rect.height() * 0.26, 5)
+    radius = min(rect.height() * 0.3, 6)
     path.addRoundedRect(rect.adjusted(0.5, 0.5, -0.5, -0.5), radius, radius)
     painter.fillPath(path, background)
-    painter.setPen(QPen(border, 0.7))
+    painter.setPen(QPen(border, 0.8))
     painter.drawPath(path)
     return True
 
@@ -527,7 +519,7 @@ class RawText(QWidget):
             border.setAlpha(min(background.alpha(), 90))
             painter.setPen(QPen(border, 0.7))
             painter.drawPath(path)
-        self._pen_text.setColor(getattr(self, "_standings_text_color", None) or self.fg)
+        self._pen_text.setColor(self.fg)
         painter.setPen(self._pen_text)
         painter.drawText(0, self._offset_y, self._width, self._height, self._alignment, self.text)
 
@@ -791,8 +783,6 @@ class DeltaLapTime(QWidget):
 
             if self.is_player:
                 fg_color = self.fg_player
-                if getattr(self, "standings_style", False):
-                    fg_color = QColor("#D9FFF5")
 
             self._pen_text.setColor(fg_color)
             painter.setPen(self._pen_text)
