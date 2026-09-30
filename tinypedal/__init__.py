@@ -21,6 +21,16 @@ Init logger, state, signal
 """
 
 import logging
+import os
+import sys
+
+# py2exe keeps PySide2's Qt runtime DLLs in the adjacent "lib" directory.
+# Register it before importing QtCore so Windows can resolve those dependencies.
+_dll_directory_handles = []
+if sys.platform == "win32" and hasattr(os, "add_dll_directory"):
+    _dll_directory = os.path.join(os.path.dirname(sys.executable), "lib")
+    if os.path.isdir(_dll_directory):
+        _dll_directory_handles.append(os.add_dll_directory(_dll_directory))
 
 from PySide2.QtCore import QObject, Signal
 

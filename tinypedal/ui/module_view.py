@@ -34,10 +34,12 @@ from PySide2.QtWidgets import (
 
 from .. import app_signal
 from ..formatter import format_module_name
+from ..design_options import REDESIGNED_WIDGETS
 from ..module_control import ModuleControl
 from ..setting import cfg
 from ._common import UIScaler
 from .config import UserConfig
+from .design_config import RedesignedWidgetConfig
 
 
 class ModuleList(QWidget):
@@ -155,7 +157,7 @@ class ModuleControlItem(QWidget):
         # Use "clicked" to avoid trigger with "setChecked"
         self.button_toggle.clicked.connect(self.toggle_state)
 
-        button_config = QPushButton("Config")
+        button_config = QPushButton("Advanced" if module_name in REDESIGNED_WIDGETS else "Config")
         button_config.setObjectName("buttonConfig")
         button_config.pressed.connect(self.open_config_dialog)
 
@@ -163,6 +165,11 @@ class ModuleControlItem(QWidget):
         layout_item.setContentsMargins(0, 0, 0, 0)
         layout_item.addStretch(1)
         layout_item.setSpacing(0)
+        if module_name in REDESIGNED_WIDGETS:
+            button_design = QPushButton("Design")
+            button_design.setObjectName("buttonConfig")
+            button_design.pressed.connect(self.open_design_dialog)
+            layout_item.addWidget(button_design)
         layout_item.addWidget(button_config)
         layout_item.addWidget(self.button_toggle)
         self.setLayout(layout_item)
@@ -198,6 +205,15 @@ class ModuleControlItem(QWidget):
             reload_func=self.reload_module,
         )
         _dialog.open()
+
+    def open_design_dialog(self):
+        """Open simple design controls for recently redesigned widgets."""
+        dialog = RedesignedWidgetConfig(
+            parent=self._parent,
+            widget_name=self.module_name,
+            reload_func=self.reload_module,
+        )
+        dialog.open()
 
     def reload_module(self):
         """Reload module & button state"""

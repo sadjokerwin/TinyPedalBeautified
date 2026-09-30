@@ -175,6 +175,9 @@ class GearDashboard(QWidget):
         self.rpm_max = 0
         self.gear_max = 0
         self.speed_limiter = False
+        self.tc_level = -1
+        self.tc_cut_level = -1
+        self.tc_slip_angle = -1
         self._pit_flash_phase = False
         self._pit_flash_timer = QTimer(self)
         self._pit_flash_timer.setInterval(250)
@@ -197,7 +200,7 @@ class GearDashboard(QWidget):
             for name, enabled_key, color_key, max_key, text_key in pedal_specs
             if pedal_cfg[enabled_key]
         )
-        self.setFixedSize(round(self.base * 8.0), round(self.base * 4.0))
+        self.setFixedSize(round(self.base * 8.0), round(self.base * 5.0))
 
     def _font(self, size, weight="Bold"):
         font = QFont(self.family)
@@ -205,7 +208,7 @@ class GearDashboard(QWidget):
         font.setWeight(FONT_WEIGHT_MAP[weight])
         return font
 
-    def set_telemetry(self, gear, speed, rpm, rpm_max, gear_max, limiter):
+    def set_telemetry(self, gear, speed, rpm, rpm_max, gear_max, limiter, tc_level=-1, tc_cut_level=-1, tc_slip_angle=-1):
         limiter = bool(limiter)
         if limiter and not self.speed_limiter:
             self._pit_flash_phase = True
@@ -229,6 +232,9 @@ class GearDashboard(QWidget):
         self.gear_max = gear_max
         self.speed_limiter = limiter
         self.rev_limiter = rev_limiter
+        self.tc_level = tc_level
+        self.tc_cut_level = tc_cut_level
+        self.tc_slip_angle = tc_slip_angle
         self.update()
 
     def _toggle_rev_flash(self):
@@ -329,18 +335,40 @@ class GearDashboard(QWidget):
         p.setPen(QColor("#F1F5F8"))
         p.setFont(self.speed_font)
         speed_value = f"{int(round(self.speed)):03d}"
+        primary_h = core_h * 0.68
+        speed_area = QRectF(speed_left, core_top, speed_right - speed_left, primary_h)
         if self.speed_limiter:
-            pit_rect = QRectF(speed_left, core_top, speed_right - speed_left, core_h * 0.48)
-            speed_rect = QRectF(speed_left, core_top + core_h * 0.42,
-                                speed_right - speed_left, core_h * 0.58)
+            pit_rect = QRectF(speed_left, core_top, speed_right - speed_left, primary_h * 0.52)
+            speed_rect = QRectF(speed_left, core_top + primary_h * 0.43,
+                                speed_right - speed_left, primary_h * 0.57)
             p.setPen(QColor("#F6C445"))
             p.setFont(self.speed_font)
             p.drawText(pit_rect, Qt.AlignCenter, "PIT")
             p.setPen(QColor("#F1F5F8"))
             p.drawText(speed_rect, Qt.AlignCenter, speed_value)
         else:
-            p.drawText(QRectF(speed_left, core_top, speed_right - speed_left, core_h),
-                       Qt.AlignCenter, speed_value)
+            p.drawText(speed_area, Qt.AlignCenter, speed_value)
+
+        # Three compact, horizontal readouts: uppercase label above the level.
+        readout_top = core_top + primary_h
+        readout_h = max(core_bottom - readout_top, self.base * 0.45)
+        readout_gap = self.base * 0.08
+        group_w = (speed_right - speed_left - readout_gap * 2) / 3
+        readouts = (("TC", str(self.tc_level) if self.tc_level >= 0 else "--"),
+                    ("TC CUT", str(self.tc_cut_level) if self.tc_cut_level >= 0 else "--"),
+                    ("SLIP",  str(self.tc_slip_angle) if self.tc_slip_angle >= 0 else "--"))
+        for idx, (label, value) in enumerate(readouts):
+            x = speed_left + idx * (group_w + readout_gap)
+            box = QRectF(x, readout_top, group_w, readout_h)
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor("#1C2731"))
+            p.drawRoundedRect(box, self.base * .18, self.base * .18)
+            p.setPen(QColor("#8FA1AF"))
+            p.setFont(self._font(self.base * .22, "Medium"))
+            p.drawText(QRectF(x, readout_top + self.base * .03, group_w, readout_h * .42), Qt.AlignCenter, label)
+            p.setPen(QColor("#EAF2F7"))
+            p.setFont(self._font(self.base * .34, "Semi Bold"))
+            p.drawText(QRectF(x, readout_top + readout_h * .40, group_w, readout_h * .58), Qt.AlignCenter, value)
 
         # Colored vertical tracks identify each control without text labels.
         pedal_count = max(len(self.pedal_specs), 1)
@@ -527,8 +555,12 @@ class Realtime(Overlay):
         rpm = api.read.engine.rpm()
         speed = api.read.vehicle.speed()
         limiter = api.read.switch.speed_limiter() if self.wcfg["show_speed_limiter"] else 0
+        tc_level = api.read.switch.tc_level()
+        tc_cut_level = api.read.switch.tc_cut_level()
+        tc_slip_angle = api.read.switch.tc_slip_level()
         self.dashboard.set_telemetry(
-            GEAR_SEQUENCE(gear, "N"), self.unit_speed(speed), rpm, rpm_max, self.gear_max, limiter
+            GEAR_SEQUENCE(gear, "N"), self.unit_speed(speed), rpm, rpm_max, self.gear_max, limiter,
+            tc_level, tc_cut_level, tc_slip_angle
         )
         self.update_pedals()
 

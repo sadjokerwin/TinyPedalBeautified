@@ -20,8 +20,12 @@
 Virtual energy Widget
 """
 
+from math import ceil
+
 from .. import calculation as calc
 from ..module_info import minfo
+from ._consumption_metrics import consumption_metrics, format_extension_targets
+from ._consumption_card import ConsumptionStrategyCard
 from ._base import Overlay
 from ._common import warning_flash
 from ._painter import FuelLevelBar
@@ -57,6 +61,21 @@ class Realtime(Overlay):
         layout_lower = self.set_grid_layout()
         layout.addLayout(layout_upper, self.wcfg["display_order_upper"], 0)
         layout.addLayout(layout_lower, self.wcfg["display_order_lower"], 0)
+
+        # Recent-use strategy footer, shared by fuel and virtual energy.
+        self.bar_strategy = self.set_rawtext(
+            text="SAVE +1l --   +2l --   +3l --",
+            fixed_height=font_m.height,
+            offset_y=font_m.voffset,
+            fg_color=self.wcfg.get("font_color_estimated_consumption", self.wcfg.get("font_color_remaining", "#FFFFFF")),
+            bg_color=self.wcfg.get("background_color_estimated_consumption", "#222222"),
+        )
+        strategy_row = max(
+            self.wcfg["display_order_upper"], self.wcfg["display_order_lower"],
+            self.wcfg["display_order_middle"],
+        ) + 1
+        layout.addWidget(self.bar_strategy, strategy_row, 0, 1, 6)
+        self._strategy_last = None
 
         # Caption style
         if self.wcfg["show_caption"]:
@@ -384,12 +403,34 @@ class Realtime(Overlay):
             )
             layout.addWidget(self.bar_level, self.wcfg["display_order_middle"], 0)
 
+        # Replace the old plain rows with one unified, rounded strategy card.
+        for child_layout in (layout_upper, layout_lower):
+            self._hide_calculator_rows(child_layout)
+        self.bar_strategy.hide()
+        if self.wcfg.get("show_energy_level_bar", False):
+            self.bar_level.hide()
+        self.strategy_card = ConsumptionStrategyCard(
+            self, "energy", self.wcfg["font_name"], self.wcfg["font_size"]
+        )
+        layout.addWidget(self.strategy_card, 0, 0, 1, 6)
+
         if self.wcfg["show_low_energy_warning_flash"]:
             self.warn_flash = warning_flash(
                 self.wcfg["warning_flash_highlight_duration"],
                 self.wcfg["warning_flash_interval"],
                 self.wcfg["number_of_warning_flashes"],
             )
+
+    @staticmethod
+    def _hide_calculator_rows(layout):
+        """Hide legacy children after their data has been repurposed into the card."""
+        for index in range(layout.count()):
+            item = layout.itemAt(index)
+            widget = item.widget()
+            if widget is not None:
+                widget.hide()
+            elif item.layout() is not None:
+                Realtime._hide_calculator_rows(item.layout())
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
@@ -415,21 +456,56 @@ class Realtime(Overlay):
             amount_need = calc.sym_max(minfo.energy.neededRelative, 9999)
             self.update_energy(self.bar_need, amount_need + padding, self.bar_style_need[is_low_energy], "+")
 
-        # Estimated laps can last
-        est_runlaps = min(minfo.energy.estimatedLaps, 9999)
-        self.update_energy(self.bar_laps, est_runlaps)
+        metrics = consumption_metrics("energy")
+        # Show stint range and average from the last five valid completed laps.
+        self.update_energy(self.bar_laps, metrics["remaining_laps"])
+        self.update_energy(self.bar_mins, metrics["remaining_minutes"])
+        self.update_energy(self.bar_used, metrics["average"])
+        self.update_energy(self.bar_save, metrics["average"] * (1 - 1 / max(metrics["remaining_laps"] + 1, 1)))
+        if self.wcfg["show_delta_consumption_and_end_remaining"]:
+            self.update_energy(self.bar_delta, metrics["current_lap_delta"] or 0, None, "+")
+            self.update_energy(self.bar_end, metrics["stint_average"])
+        strategy = format_extension_targets(metrics["extension_targets"])
+        if self._strategy_last != strategy:
+            self._strategy_last = strategy
+            self.bar_strategy.text = strategy
+            self.bar_strategy.update()
+        targets = []
+        for extra, saving in metrics["extension_targets"]:
+            if saving is not None and saving <= 0.15 and metrics["average"] > 0:
+                target_average = metrics["average"] * (1 - saving)
+                targets.append((f"+{extra} LAP", f"{target_average:.2f} %/lap"))
 
-        # Estimated minutes can last
-        est_runmins = min(minfo.energy.estimatedMinutes, 9999)
-        self.update_energy(self.bar_mins, est_runmins)
 
-        # Estimated consumption
-        used_last = minfo.energy.estimatedConsumption
-        self.update_energy(self.bar_used, used_last)
-
-        # Estimated one less pit consumption
-        energy_save = calc.zero_max(minfo.energy.oneLessPitConsumption, 99.99)
-        self.update_energy(self.bar_save, energy_save)
+        extension_saving = metrics["extension_targets"][0][1]
+        energy_to_finish = max(minfo.energy.neededRelative, 0)
+        stops_to_finish = max(ceil(minfo.energy.estimatedNumPitStopsEnd), 0)
+        finish_energy_label = "ENERGY TO GO"
+        finish_energy_text = f"{energy_to_finish:.2f}%"
+        if stops_to_finish > 1:
+            finish_energy_label = "STOPS TO GO"
+            finish_energy_text = str(stops_to_finish)
+        self.strategy_card.set_values(
+            current=minfo.energy.amountCurrent,
+            current_text=f"{minfo.energy.amountCurrent:.2f}%",
+            finish_energy_label=finish_energy_label,
+            finish_energy_text=finish_energy_text,
+            needed_text=f"{amount_need:.2f}%",
+            level=minfo.energy.amountCurrent / minfo.energy.capacity if minfo.energy.capacity else 0,
+            average_text=f"{metrics['average']:.2f}%" if metrics["average"] > 0 else "—",
+            range_text=f"{metrics['remaining_laps']:.1f} LAPS" if metrics["average"] > 0 else "—",
+            last_lap_text=f"{metrics['last_lap']:.2f}%" if metrics["last_lap"] > 0 else "—",
+            extension_target_text=(
+                "—" if metrics["average"] <= 0 else (
+                    f"{metrics['average'] * (1 - extension_saving):.2f} %"
+                    if extension_saving is not None and extension_saving <= 0.15
+                    else ">15% cut"
+                )
+            ),
+            delta_text="—" if metrics["current_lap_delta"] is None or abs(metrics["current_lap_delta"]) < metrics["average"] * 0.15 else f"{metrics['current_lap_delta']:+.2f}%",
+            delta_color="#FF7777" if metrics["current_lap_delta"] is not None and metrics["current_lap_delta"] > 0 else "#48D6C4",
+            targets=tuple(targets),
+        )
 
         if self.wcfg["show_estimated_pitstop_count"]:
             # Estimate pit stop counts when pitting at end of current stint
@@ -440,14 +516,6 @@ class Realtime(Overlay):
             est_pits_early = calc.zero_max(minfo.energy.estimatedNumPitStopsEarly, 99.99)
             self.update_energy(self.bar_early, est_pits_early)
 
-        if self.wcfg["show_delta_consumption_and_end_remaining"]:
-            # Delta consumption
-            delta_energy = minfo.energy.deltaConsumption
-            self.update_energy(self.bar_delta, delta_energy, None, "+")
-
-            # Estimated end remaining
-            amount_end = minfo.energy.amountEndStint
-            self.update_energy(self.bar_end, amount_end)
 
         if self.wcfg["show_fuel_ratio_and_fuel_bias"]:
             # Fuel ratio

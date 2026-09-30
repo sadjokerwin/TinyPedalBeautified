@@ -29,6 +29,7 @@ from time import strftime
 from .. import calculation as calc, units
 from ..api_control import api
 from ..const_common import MAX_SECONDS, TEXT_NOLAPTIME, TEXT_TREND_SIGN
+from ..design_options import STANDINGS_COLUMN_OPTIONS
 from ..formatter import shorten_driver_name
 from ..module_info import minfo
 from ..userfile.custom_image import load_brand_logo_image
@@ -95,22 +96,22 @@ def readable_class_text(background, preferred):
 class StandingsBoard(QWidget):
     """Paint the full timing board in one measured, fixed-width surface."""
 
-    COLUMNS = (
-        ("position", "POS", 4.0, Qt.AlignCenter),
-        ("class_position", "C POS", 5.8, Qt.AlignCenter),
-        ("change", "CHG", 4.2, Qt.AlignCenter),
-        ("driver", "DRIVER", 13.0, Qt.AlignLeft),
-        ("class", "CLASS", 7.5, Qt.AlignCenter),
-        ("brand", "CAR", 5.0, Qt.AlignCenter),
-        ("damage", "DAMAGE", 5.8, Qt.AlignCenter),
-        ("gap", "GAP", 5.6, Qt.AlignRight),
-        ("interval", "INT", 5.4, Qt.AlignRight),
-        ("laptime", "LAST LAP", 8.0, Qt.AlignRight),
-        ("energy", "VE", 5.4, Qt.AlignCenter),
-        ("tyre", "TYRE", 4.8, Qt.AlignCenter),
-        ("status", "PIT", 5.2, Qt.AlignCenter),
-    )
-    SEPARATORS = {3, 7, 9, 10, 11, 12}
+    COLUMN_LAYOUT = {
+        "position": ("POS", 4.0, Qt.AlignCenter),
+        "class_position": ("C POS", 5.8, Qt.AlignCenter),
+        "change": ("CHG", 4.2, Qt.AlignCenter),
+        "driver": ("DRIVER", 13.0, Qt.AlignLeft),
+        "class": ("CLASS", 7.5, Qt.AlignCenter),
+        "brand": ("CAR", 5.0, Qt.AlignCenter),
+        "damage": ("DAMAGE", 5.8, Qt.AlignCenter),
+        "gap": ("GAP", 5.6, Qt.AlignRight),
+        "interval": ("INT", 5.4, Qt.AlignRight),
+        "laptime": ("LAST LAP", 8.0, Qt.AlignRight),
+        "energy": ("VE", 5.4, Qt.AlignCenter),
+        "tyre": ("TYRE", 4.8, Qt.AlignCenter),
+        "status": ("PIT", 5.2, Qt.AlignCenter),
+    }
+    SEPARATORS = {"driver", "gap", "laptime", "energy", "tyre", "status"}
 
     def __init__(self, parent, font, font_size, font_weight, columns, max_rows):
         super().__init__(parent)
@@ -121,6 +122,14 @@ class StandingsBoard(QWidget):
         self._lap_header = "LAST LAP"
         self._session_info = ("--:--:--", "-- / --", "--:--:--")
         self._weather_info = (("-- / --", "●", MUTED), "--", ("DRY 0%", GREEN))
+        visible = {
+            key: setting_key for key, _, setting_key in STANDINGS_COLUMN_OPTIONS
+        }
+        self.COLUMNS = tuple(
+            (key, *self.COLUMN_LAYOUT[key])
+            for key in self.COLUMN_LAYOUT
+            if parent.wcfg.get(visible[key], True)
+        ) or (("position", *self.COLUMN_LAYOUT["position"]),)
         self._column_data = columns
         self._max_rows = max_rows
         self._count = 0
@@ -339,7 +348,9 @@ class StandingsBoard(QWidget):
 
         # Light separators define groups without adding visual clutter.
         painter.setPen(QPen(QColor("#33455260"), 0.7))
-        for index in self.SEPARATORS:
+        for index, (key, _, _, _) in enumerate(self.COLUMNS):
+            if key not in self.SEPARATORS:
+                continue
             x = self._column_x[index] - self._font_size * 0.34
             painter.drawLine(round(x), round(card.top() + self._row_height * 0.23),
                              round(x), round(card.bottom() - self._row_height * 0.23))

@@ -76,6 +76,12 @@ QT_MEDIASERVICE = [
     f"{PYTHON_PATH}/Lib/site-packages/PySide2/plugins/mediaservice/wmfengine.dll",
 ]
 
+# PySide2's support DLL imports Qt5Qml.dll even when TinyPedal does not
+# directly import the QML module; py2exe can miss this indirect dependency.
+QT_SUPPORT_LIBS = [
+    f"{PYTHON_PATH}/Lib/site-packages/PySide2/Qt5Qml.dll",
+]
+
 BUILD_DATA_FILES = [
     ("", ["LICENSE.txt", "README.md"]),
     ("docs", DOCUMENT_FILES),
@@ -83,6 +89,7 @@ BUILD_DATA_FILES = [
     ("images", IMAGE_FILES),
     ("platforms", QT_PLATFORMS),
     ("mediaservice", QT_MEDIASERVICE),
+    ("lib", QT_SUPPORT_LIBS),
 ]
 
 BUILD_OPTIONS = {
